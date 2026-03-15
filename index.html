@@ -51,6 +51,10 @@
       );
     }
 
+    body.perf-on::before {
+      opacity: 0.08;
+    }
+
     .game-wrap {
       position: relative;
       width: min(96vw, 1200px);
@@ -65,6 +69,11 @@
         inset 0 0 24px rgba(0, 245, 255, 0.1);
       background: rgba(2, 6, 14, 0.55);
       backdrop-filter: blur(4px);
+    }
+
+    body.perf-on .game-wrap {
+      backdrop-filter: none;
+      box-shadow: 0 0 10px rgba(0, 245, 255, 0.2);
     }
 
     canvas {
@@ -306,6 +315,14 @@
             </select>
           </div>
           <div class="control-row">
+            <span>Performance</span>
+            <select id="perfSelect">
+              <option value="auto" selected>Auto</option>
+              <option value="on">On</option>
+              <option value="off">Off</option>
+            </select>
+          </div>
+          <div class="control-row">
             <span>Schwierigkeit</span>
             <select id="difficultySelect">
               <option value="easy">Easy</option>
@@ -361,6 +378,7 @@
       const restartBtn = document.getElementById("restartBtn");
 
       const modeSelect = document.getElementById("modeSelect");
+      const perfSelect = document.getElementById("perfSelect");
       const difficultySelect = document.getElementById("difficultySelect");
       const difficultyBadge = document.getElementById("difficultyBadge");
       const perfToggle = document.getElementById("perfToggle");
@@ -454,6 +472,7 @@
       }
 
       function spawnTrailParticle() {
+        if (perfMode === "on") return;
         const speed = Math.hypot(ball.vx, ball.vy);
         const heat = clamp((speed - 300) / 1200, 0.2, 1);
         const hue = 22 + (1 - heat) * 28; // gelb -> orange -> rot
@@ -473,6 +492,7 @@
       }
 
       function spawnSparks(x, y, baseAngle, colorHue = 190) {
+        if (perfMode === "on") return;
         const count = Math.max(6, Math.floor(12 * fxQuality));
         for (let i = 0; i < count; i++) {
           const a = baseAngle + randomRange(-0.65, 0.65);
@@ -501,12 +521,19 @@
       function updatePerfToggleUi() {
         perfToggle.textContent =
           perfMode === "on" ? "Perf: On" : perfMode === "off" ? "Perf: Off" : "Perf: Auto";
+        perfSelect.value = perfMode;
+        document.body.classList.toggle("perf-on", perfMode === "on");
+      }
+
+      function applyPerfMode(mode) {
+        perfMode = mode === "on" || mode === "off" ? mode : "auto";
+        updatePerfToggleUi();
+        updateCanvasResolution();
       }
 
       function cyclePerfMode() {
-        perfMode = perfMode === "auto" ? "on" : perfMode === "on" ? "off" : "auto";
-        updatePerfToggleUi();
-        resizeCanvas();
+        const nextMode = perfMode === "auto" ? "on" : perfMode === "on" ? "off" : "auto";
+        applyPerfMode(nextMode);
       }
 
       function applyDifficulty(id) {
@@ -682,19 +709,26 @@
       // -------------------------------
       // Resize
       // -------------------------------
-      function resizeCanvas() {
+      function updateCanvasResolution() {
         const rect = canvas.getBoundingClientRect();
         width = Math.max(320, rect.width);
         height = Math.max(240, rect.height);
-        dpr = Math.max(1, window.devicePixelRatio || 1);
+        const rawDpr = Math.max(1, window.devicePixelRatio || 1);
+        dpr = perfMode === "on" ? 1 : Math.min(rawDpr, 1.5);
 
         // Performance-Modus rendert intern mit geringerer Aufloesung.
-        const scaleByMode = perfMode === "on" ? 0.72 : perfMode === "off" ? 1 : 1;
-        renderScale = Math.max(0.62, Math.min(1, scaleByMode * fxQuality));
+        const scaleByMode = perfMode === "on" ? 0.5 : 1;
+        renderScale = Math.max(0.5, Math.min(1, scaleByMode));
 
         canvas.width = Math.round(width * dpr * renderScale);
         canvas.height = Math.round(height * dpr * renderScale);
         ctx.setTransform(dpr * renderScale, 0, 0, dpr * renderScale, 0, 0);
+      }
+
+      function resizeCanvas(resetState = true) {
+        updateCanvasResolution();
+
+        if (!resetState) return;
 
         resetPaddles();
         resetBall(ball.vx >= 0 ? 1 : -1);
@@ -749,12 +783,6 @@
         }
         if (sparkParticles.length > maxSparks) {
           sparkParticles.splice(0, sparkParticles.length - maxSparks);
-        }
-
-        // Wenn sich Qualitaet sichtbar aendert, Canvas-Aufloesung nachziehen.
-        const targetScale = perfMode === "on" ? 0.72 : perfMode === "off" ? 1 : fxQuality;
-        if (Math.abs(targetScale - renderScale) > 0.18) {
-          resizeCanvas();
         }
       }
 
@@ -967,6 +995,7 @@
       }
 
       function drawFireTrail() {
+        if (perfMode === "on") return;
         if (!trailParticles.length) return;
         ctx.save();
         const step = fxQuality < 1 ? 2 : 1;
@@ -990,6 +1019,7 @@
       }
 
       function drawSparks() {
+        if (perfMode === "on") return;
         if (!sparkParticles.length) return;
         ctx.save();
         const step = fxQuality < 1 ? 2 : 1;
@@ -1084,6 +1114,10 @@
 
       modeSelect.addEventListener("change", () => {
         applyGameMode(modeSelect.value);
+      });
+
+      perfSelect.addEventListener("change", () => {
+        applyPerfMode(perfSelect.value);
       });
 
       soundToggle.addEventListener("click", () => {
