@@ -304,6 +304,12 @@
       letter-spacing: 0.06em;
     }
 
+    .exit-btn {
+      border-color: rgba(255, 87, 120, 0.75);
+      background: linear-gradient(125deg, rgba(255, 87, 120, 0.2), rgba(80, 10, 28, 0.2));
+      box-shadow: 0 0 10px rgba(255, 87, 120, 0.28);
+    }
+
     .game-over-text {
       margin: 2px 0 14px;
       font-size: 1.03rem;
@@ -426,6 +432,7 @@
       <span class="difficulty" id="difficultyBadge">Normal</span>
       <button class="toggle" id="perfToggle">Perf: Auto</button>
       <button class="toggle" id="soundToggle">Sound: On</button>
+      <button class="toggle exit-btn" id="exitBtn">Exit</button>
     </div>
 
     <div class="overlay" id="startOverlay">
@@ -536,6 +543,7 @@
       const difficultyBadge = document.getElementById("difficultyBadge");
       const perfToggle = document.getElementById("perfToggle");
       const soundToggle = document.getElementById("soundToggle");
+      const exitBtn = document.getElementById("exitBtn");
       const leftLabel = document.getElementById("leftLabel");
       const rightLabel = document.getElementById("rightLabel");
 
@@ -941,6 +949,26 @@
         startOverlay.classList.add("hidden");
         gameOverOverlay.classList.add("hidden");
         gameState = "playing";
+      }
+
+      function exitCurrentMatch() {
+        gameState = "idle";
+        serveDelay = 0;
+        powerUp = null;
+        trailParticles = [];
+        sparkParticles = [];
+        clearEffects();
+        startOverlay.classList.remove("hidden");
+        gameOverOverlay.classList.add("hidden");
+        winnerText.textContent = "";
+
+        if (gameMode === "online-host" || gameMode === "online-guest") {
+          closeNet();
+          updateConnectionStatus("Nicht verbunden");
+        }
+
+        resetPaddles();
+        resetBall();
       }
 
       function endMatch(playerWon) {
@@ -1472,6 +1500,7 @@
         if (audioEnabled) ensureAudio();
       });
 
+      exitBtn.addEventListener("click", exitCurrentMatch);
       perfToggle.addEventListener("click", cyclePerfMode);
       window.addEventListener("beforeunload", closeNet);
 
