@@ -210,6 +210,40 @@
       opacity: 0.92;
     }
 
+    .online-panel {
+      margin-top: 8px;
+      padding: 10px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      background: rgba(0, 0, 0, 0.22);
+      display: grid;
+      gap: 8px;
+    }
+
+    .online-panel textarea {
+      width: 100%;
+      min-height: 84px;
+      resize: vertical;
+      border-radius: 8px;
+      border: 1px solid rgba(0, 245, 255, 0.35);
+      background: rgba(8, 12, 20, 0.9);
+      color: var(--text);
+      padding: 8px;
+      font-size: 0.78rem;
+      line-height: 1.3;
+    }
+
+    .online-row {
+      display: grid;
+      gap: 6px;
+    }
+
+    .small {
+      font-size: 0.74rem;
+      opacity: 0.82;
+      line-height: 1.3;
+    }
+
     select,
     .btn,
     .toggle {
@@ -312,6 +346,8 @@
             <select id="modeSelect">
               <option value="single" selected>Singleplayer</option>
               <option value="multi">Multiplayer (Lokal)</option>
+              <option value="online-host">Online Host (2 Geraete)</option>
+              <option value="online-guest">Online Join (2 Geraete)</option>
             </select>
           </div>
           <div class="control-row">
@@ -330,6 +366,23 @@
               <option value="hard">Hard</option>
             </select>
           </div>
+        </div>
+
+        <div id="onlinePanel" class="online-panel hidden">
+          <div id="hostPanel" class="online-row hidden">
+            <button class="toggle" id="createOfferBtn">Host-Code erzeugen</button>
+            <textarea id="offerOut" readonly placeholder="Host-Code erscheint hier"></textarea>
+            <textarea id="answerIn" placeholder="Antwort-Code vom Join-Spieler hier einfuegen"></textarea>
+            <button class="toggle" id="applyAnswerBtn">Antwort uebernehmen</button>
+            <p class="small">1) Host-Code senden, 2) Antwort einfuegen, 3) warten bis 'Verbunden'.</p>
+          </div>
+          <div id="guestPanel" class="online-row hidden">
+            <textarea id="offerIn" placeholder="Host-Code hier einfuegen"></textarea>
+            <button class="toggle" id="createAnswerBtn">Antwort erzeugen</button>
+            <textarea id="answerOut" readonly placeholder="Antwort-Code erscheint hier"></textarea>
+            <p class="small">Host-Code einfuegen, Antwort erzeugen und an Host senden.</p>
+          </div>
+          <p id="connectionStatus" class="small">Status: Nicht verbunden</p>
         </div>
 
         <button class="btn" id="startBtn">Start</button>
@@ -378,6 +431,17 @@
       const restartBtn = document.getElementById("restartBtn");
 
       const modeSelect = document.getElementById("modeSelect");
+      const onlinePanel = document.getElementById("onlinePanel");
+      const hostPanel = document.getElementById("hostPanel");
+      const guestPanel = document.getElementById("guestPanel");
+      const createOfferBtn = document.getElementById("createOfferBtn");
+      const applyAnswerBtn = document.getElementById("applyAnswerBtn");
+      const createAnswerBtn = document.getElementById("createAnswerBtn");
+      const offerOut = document.getElementById("offerOut");
+      const answerIn = document.getElementById("answerIn");
+      const offerIn = document.getElementById("offerIn");
+      const answerOut = document.getElementById("answerOut");
+      const connectionStatus = document.getElementById("connectionStatus");
       const perfSelect = document.getElementById("perfSelect");
       const difficultySelect = document.getElementById("difficultySelect");
       const difficultyBadge = document.getElementById("difficultyBadge");
@@ -459,6 +523,11 @@
       let frameBudgetPenalty = 0;
       let perfMode = "auto"; // auto | on | off
       let renderScale = 1;
+      let isMobile = matchMedia("(pointer: coarse)").matches;
+      let netPeer = null;
+      let netChannel = null;
+      let remoteRightTarget = 0;
+      let netSendTimer = 0;
 
       // -------------------------------
       // Utilities
@@ -469,6 +538,131 @@
 
       function randomRange(min, max) {
         return min + Math.random() * (max - min);
+      }
+
+      function updateConnectionStatus(text) {
+        connectionStatus.textContent = "Status: " + text;
+      }
+
+      function updateOnlineUi() {
+        const online = gameMode === "online-host" || gameMode === "online-guest";
+        onlinePanel.classList.toggle("hidden", !online);
+        hostPanel.classList.toggle("hidden", gameMode !== "online-host");
+        guestPanel.classList.toggle("hidden", gameMode !== "online-guest");
+      }
+
+      function closeNet() {
+        if (netChannel) {
+          netChannel.onopen = null;
+          netChannel.onclose = null;
+          netChannel.onmessage = null;
+          netChannel.close();
+        }
+        if (netPeer) {
+          netPeer.onicecandidate = null;
+          netPeer.ondatachannel = null;
+          netPeer.close();
+        }
+        netPeer = null;
+        netChannel = null;
+      }
+
+      function netConnected() {
+        return !!netChannel && netChannel.readyState === "open";
+      }
+
+      function getRtc() {
+        return new RTCPeerConnection({
+          iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+        });
+      }
+
+      function attachChannel(channel) {
+        netChannel = channel;
+        netChannel.onopen = () => updateConnectionStatus("Verbunden");
+        netChannel.onclose = () => updateConnectionStatus("Getrennt");
+        netChannel.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.t === "input" && gameMode === "online-host") {
+              remoteRightTarget = clamp(msg.y, 0, height);
+            }
+            if (msg.t === "state" && gameMode === "online-guest") {
+              player.x = msg.s.player.x;
+              player.y = msg.s.player.y;
+              player.w = msg.s.player.w;
+              player.h = msg.s.player.h;
+              ai.x = msg.s.ai.x;
+              ai.y = msg.s.ai.y;
+              ai.w = msg.s.ai.w;
+              ai.h = msg.s.ai.h;
+              ball.x = msg.s.ball.x;
+              ball.y = msg.s.ball.y;
+              ball.r = msg.s.ball.r;
+              playerScore = msg.s.playerScore;
+              aiScore = msg.s.aiScore;
+              serveDelay = msg.s.serveDelay;
+              updateScoreUi();
+              gameState = msg.s.gameState;
+              if (gameState === "gameover") {
+                winnerText.textContent = msg.s.winnerText || "Game Over";
+                gameOverOverlay.classList.remove("hidden");
+              } else {
+                gameOverOverlay.classList.add("hidden");
+              }
+              if (gameState === "playing") startOverlay.classList.add("hidden");
+            }
+          } catch (_err) {
+            // Ignoriere defekte Pakete.
+          }
+        };
+      }
+
+      async function createHostOffer() {
+        closeNet();
+        netPeer = getRtc();
+        const channel = netPeer.createDataChannel("pong");
+        attachChannel(channel);
+        updateConnectionStatus("Host-Code wird erzeugt...");
+
+        netPeer.onicecandidate = () => {
+          if (!netPeer || !netPeer.localDescription) return;
+          if (netPeer.iceGatheringState === "complete") {
+            offerOut.value = btoa(JSON.stringify(netPeer.localDescription));
+            updateConnectionStatus("Host-Code bereit");
+          }
+        };
+
+        const offer = await netPeer.createOffer();
+        await netPeer.setLocalDescription(offer);
+      }
+
+      async function applyHostAnswer() {
+        if (!netPeer || !answerIn.value.trim()) return;
+        const answer = JSON.parse(atob(answerIn.value.trim()));
+        await netPeer.setRemoteDescription(answer);
+        updateConnectionStatus("Antwort gesetzt, warte auf Verbindung...");
+      }
+
+      async function createGuestAnswer() {
+        if (!offerIn.value.trim()) return;
+        closeNet();
+        netPeer = getRtc();
+        updateConnectionStatus("Join verbindet...");
+
+        netPeer.ondatachannel = (e) => attachChannel(e.channel);
+        netPeer.onicecandidate = () => {
+          if (!netPeer || !netPeer.localDescription) return;
+          if (netPeer.iceGatheringState === "complete") {
+            answerOut.value = btoa(JSON.stringify(netPeer.localDescription));
+            updateConnectionStatus("Antwort bereit, an Host senden");
+          }
+        };
+
+        const offer = JSON.parse(atob(offerIn.value.trim()));
+        await netPeer.setRemoteDescription(offer);
+        const answer = await netPeer.createAnswer();
+        await netPeer.setLocalDescription(answer);
       }
 
       function spawnTrailParticle() {
@@ -540,15 +734,24 @@
         currentDifficulty = id in DIFFICULTIES ? id : "normal";
         ai.speed = DIFFICULTIES[currentDifficulty].aiSpeed;
         ai.mistake = DIFFICULTIES[currentDifficulty].aiMistake;
-        difficultyBadge.textContent =
-          gameMode === "multi" ? "Multiplayer" : DIFFICULTIES[currentDifficulty].label;
+        if (gameMode === "multi") difficultyBadge.textContent = "Multiplayer";
+        else if (gameMode === "online-host" || gameMode === "online-guest") difficultyBadge.textContent = "Online";
+        else difficultyBadge.textContent = DIFFICULTIES[currentDifficulty].label;
       }
 
       function applyGameMode(id) {
-        gameMode = id === "multi" ? "multi" : "single";
-        leftLabel.textContent = gameMode === "multi" ? "P1" : "Player";
-        rightLabel.textContent = gameMode === "multi" ? "P2" : "AI";
-        difficultySelect.disabled = gameMode === "multi";
+        const wasOnline = gameMode === "online-host" || gameMode === "online-guest";
+        if (id === "multi" || id === "online-host" || id === "online-guest") gameMode = id;
+        else gameMode = "single";
+        const isOnline = gameMode === "online-host" || gameMode === "online-guest";
+        if (wasOnline && !isOnline) {
+          closeNet();
+          updateConnectionStatus("Nicht verbunden");
+        }
+        leftLabel.textContent = gameMode === "single" ? "Player" : "P1";
+        rightLabel.textContent = gameMode === "single" ? "AI" : "P2";
+        difficultySelect.disabled = gameMode !== "single";
+        updateOnlineUi();
         applyDifficulty(difficultySelect.value);
       }
 
@@ -613,6 +816,10 @@
       }
 
       function startMatch() {
+        if ((gameMode === "online-host" || gameMode === "online-guest") && !netConnected()) {
+          updateConnectionStatus("Nicht verbunden - erst Host/Join koppeln");
+          return;
+        }
         ensureAudio();
         playerScore = 0;
         aiScore = 0;
@@ -630,6 +837,7 @@
 
         resetPaddles();
         resetBall();
+        remoteRightTarget = ai.y + ai.h * 0.5;
         serveDelay = 0.35;
 
         winnerText.textContent = "";
@@ -641,7 +849,7 @@
 
       function endMatch(playerWon) {
         gameState = "gameover";
-        if (gameMode === "multi") {
+        if (gameMode !== "single") {
           winnerText.textContent = playerWon ? "Player 1 gewinnt!" : "Player 2 gewinnt!";
         } else {
           winnerText.textContent = playerWon ? "Du hast gewonnen!" : "Die KI hat gewonnen!";
@@ -688,7 +896,9 @@
         const x = clientX - rect.left;
         const y = clientY - rect.top;
         const targetY = y - player.h / 2;
-        if (gameMode === "multi" && x > rect.width / 2) {
+        if (gameMode === "online-guest") {
+          ai.targetY = targetY;
+        } else if (gameMode === "multi" && x > rect.width / 2) {
           ai.targetY = targetY;
         } else {
           player.targetY = targetY;
@@ -796,6 +1006,22 @@
       }
 
       function update(dt) {
+        if (gameMode === "online-guest") {
+          if (netConnected() && gameState === "playing") {
+            netSendTimer += dt;
+            if (netSendTimer >= 0.02) {
+              netSendTimer = 0;
+              netChannel.send(
+                JSON.stringify({
+                  t: "input",
+                  y: clamp(ai.targetY + ai.h * 0.5, 0, height)
+                })
+              );
+            }
+          }
+          return;
+        }
+
         if (gameState !== "playing") return;
 
         updateEffects(dt);
@@ -827,7 +1053,9 @@
         player.y = clamp(player.y, 0, height - player.h);
 
         let aiTarget = ai.y;
-        if (gameMode === "multi") {
+        if (gameMode === "online-host") {
+          aiTarget = clamp(remoteRightTarget - ai.h / 2, 0, height - ai.h);
+        } else if (gameMode === "multi") {
           const rightKeyDir = (keyState.ArrowDown ? 1 : 0) - (keyState.ArrowUp ? 1 : 0);
           if (rightKeyDir !== 0) {
             ai.targetY += rightKeyDir * player.speed * dt;
@@ -918,6 +1146,27 @@
         // Punkt.
         if (ball.x + ball.r < 0) onScore("ai");
         if (ball.x - ball.r > width) onScore("player");
+
+        if (gameMode === "online-host" && netConnected()) {
+          netSendTimer += dt;
+          if (netSendTimer >= 1 / 30) {
+            netSendTimer = 0;
+            netChannel.send(JSON.stringify({ t: "state", s: getNetState() }));
+          }
+        }
+      }
+
+      function getNetState() {
+        return {
+          player: { x: player.x, y: player.y, w: player.w, h: player.h },
+          ai: { x: ai.x, y: ai.y, w: ai.w, h: ai.h },
+          ball: { x: ball.x, y: ball.y, r: ball.r },
+          playerScore,
+          aiScore,
+          serveDelay,
+          gameState,
+          winnerText: winnerText.textContent
+        };
       }
 
       // -------------------------------
@@ -1116,6 +1365,30 @@
         applyGameMode(modeSelect.value);
       });
 
+      createOfferBtn.addEventListener("click", async () => {
+        try {
+          await createHostOffer();
+        } catch (_err) {
+          updateConnectionStatus("Fehler beim Erzeugen des Host-Codes");
+        }
+      });
+
+      applyAnswerBtn.addEventListener("click", async () => {
+        try {
+          await applyHostAnswer();
+        } catch (_err) {
+          updateConnectionStatus("Fehler beim Einlesen der Antwort");
+        }
+      });
+
+      createAnswerBtn.addEventListener("click", async () => {
+        try {
+          await createGuestAnswer();
+        } catch (_err) {
+          updateConnectionStatus("Fehler beim Join-Code");
+        }
+      });
+
       perfSelect.addEventListener("change", () => {
         applyPerfMode(perfSelect.value);
       });
@@ -1127,10 +1400,13 @@
       });
 
       perfToggle.addEventListener("click", cyclePerfMode);
+      window.addEventListener("beforeunload", closeNet);
 
       // Initialisierung
       applyGameMode("single");
+      if (isMobile) applyPerfMode("on");
       updatePerfToggleUi();
+      updateConnectionStatus("Nicht verbunden");
       updateScoreUi();
       resizeCanvas();
       requestAnimationFrame(loop);
