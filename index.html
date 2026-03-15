@@ -341,8 +341,9 @@
       const POWERUP_SPAWN_MIN = 7.5;
       const POWERUP_SPAWN_MAX = 12;
       const POWERUP_DURATION = 6.5;
-      const MAX_TRAIL_PARTICLES = 140;
-      const MAX_SPARK_PARTICLES = 180;
+      const MAX_TRAIL_PARTICLES = 90;
+      const MAX_SPARK_PARTICLES = 110;
+      const TRAIL_SPAWN_INTERVAL = 0.02;
 
       const DIFFICULTIES = {
         easy: { label: "Easy", aiSpeed: 680, aiMistake: 34 },
@@ -433,6 +434,9 @@
       let activeEffects = [];
       let trailParticles = [];
       let sparkParticles = [];
+      let trailSpawnTimer = 0;
+      let fxQuality = 1; // 1 = voll, 0.55 = reduziert
+      let frameBudgetPenalty = 0;
 
       // -------------------------------
       // Utilities
@@ -456,7 +460,7 @@
           vy: -ball.vy * 0.02 + randomRange(-20, 20),
           life: randomRange(0.12, 0.26),
           ttl: randomRange(0.12, 0.26),
-          size: randomRange(ball.r * 0.25, ball.r * 0.55),
+          size: randomRange(ball.r * 0.2, ball.r * 0.46),
           hue
         });
         if (trailParticles.length > MAX_TRAIL_PARTICLES) {
@@ -465,10 +469,10 @@
       }
 
       function spawnSparks(x, y, baseAngle, colorHue = 190) {
-        const count = 14;
+        const count = Math.max(6, Math.floor(12 * fxQuality));
         for (let i = 0; i < count; i++) {
           const a = baseAngle + randomRange(-0.65, 0.65);
-          const force = randomRange(160, 420);
+          const force = randomRange(140, 360);
           sparkParticles.push({
             x,
             y,
@@ -577,6 +581,9 @@
         powerUp = null;
         trailParticles = [];
         sparkParticles = [];
+        trailSpawnTimer = 0;
+        frameBudgetPenalty = 0;
+        fxQuality = 1;
         queuePowerSpawn();
 
         resetPaddles();
@@ -615,6 +622,7 @@
         powerUp = null;
         trailParticles = [];
         sparkParticles = [];
+        trailSpawnTimer = 0;
         queuePowerSpawn();
 
         if (playerScore >= WIN_SCORE) {
@@ -705,6 +713,24 @@
         sparkParticles = sparkParticles.filter((p) => p.ttl > 0);
       }
 
+      function updateFxQuality(dt) {
+        // Reagiert auf schwankende Framerate und reduziert VFX automatisch.
+        if (dt > 0.028) frameBudgetPenalty = Math.min(1, frameBudgetPenalty + 0.08);
+        else frameBudgetPenalty = Math.max(0, frameBudgetPenalty - 0.03);
+
+        fxQuality = frameBudgetPenalty > 0.35 ? 0.55 : 1;
+
+        // Harte Deckelung bei Lastspitzen.
+        const maxTrail = Math.floor(MAX_TRAIL_PARTICLES * fxQuality);
+        const maxSparks = Math.floor(MAX_SPARK_PARTICLES * fxQuality);
+        if (trailParticles.length > maxTrail) {
+          trailParticles.splice(0, trailParticles.length - maxTrail);
+        }
+        if (sparkParticles.length > maxSparks) {
+          sparkParticles.splice(0, sparkParticles.length - maxSparks);
+        }
+      }
+
       function updatePowerupSpawn(dt) {
         if (powerUp || gameState !== "playing") return;
         nextPowerSpawn -= dt;
@@ -718,6 +744,7 @@
         if (gameState !== "playing") return;
 
         updateEffects(dt);
+        updateFxQuality(dt);
         updatePowerupSpawn(dt);
         updateParticles(dt);
 
@@ -765,7 +792,11 @@
         const slowMul = effectFactor("slow") ? 0.82 : 1;
         ball.x += ball.vx * dt * slowMul;
         ball.y += ball.vy * dt * slowMul;
-        spawnTrailParticle();
+        trailSpawnTimer += dt;
+        while (trailSpawnTimer >= TRAIL_SPAWN_INTERVAL) {
+          spawnTrailParticle();
+          trailSpawnTimer -= TRAIL_SPAWN_INTERVAL;
+        }
 
         // Wandkollision.
         if (ball.y - ball.r <= 0) {
@@ -905,13 +936,19 @@
       function drawFireTrail() {
         if (!trailParticles.length) return;
         ctx.save();
-        for (const p of trailParticles) {
+        const step = fxQuality < 1 ? 2 : 1;
+        for (let i = 0; i < trailParticles.length; i += step) {
+          const p = trailParticles[i];
           const t = p.ttl / p.life;
           const alpha = clamp(t, 0, 1) * 0.52;
           const radius = p.size * (0.65 + (1 - t) * 0.95);
           ctx.fillStyle = "hsla(" + p.hue.toFixed(0) + ", 95%, 55%, " + alpha.toFixed(3) + ")";
-          ctx.shadowColor = "hsla(" + p.hue.toFixed(0) + ", 95%, 60%, " + Math.min(0.85, alpha + 0.2).toFixed(3) + ")";
-          ctx.shadowBlur = 10;
+          if (fxQuality === 1) {
+            ctx.shadowColor = "hsla(" + p.hue.toFixed(0) + ", 95%, 60%, " + Math.min(0.85, alpha + 0.2).toFixed(3) + ")";
+            ctx.shadowBlur = 8;
+          } else {
+            ctx.shadowBlur = 0;
+          }
           ctx.beginPath();
           ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
           ctx.fill();
@@ -922,13 +959,19 @@
       function drawSparks() {
         if (!sparkParticles.length) return;
         ctx.save();
-        for (const p of sparkParticles) {
+        const step = fxQuality < 1 ? 2 : 1;
+        for (let i = 0; i < sparkParticles.length; i += step) {
+          const p = sparkParticles[i];
           const t = p.ttl / p.life;
           const alpha = clamp(t, 0, 1) * 0.95;
           ctx.strokeStyle = "hsla(" + p.hue.toFixed(0) + ", 100%, 67%, " + alpha.toFixed(3) + ")";
           ctx.lineWidth = Math.max(1, p.size * t);
-          ctx.shadowColor = "hsla(" + p.hue.toFixed(0) + ", 100%, 67%, " + alpha.toFixed(3) + ")";
-          ctx.shadowBlur = 8;
+          if (fxQuality === 1) {
+            ctx.shadowColor = "hsla(" + p.hue.toFixed(0) + ", 100%, 67%, " + alpha.toFixed(3) + ")";
+            ctx.shadowBlur = 5;
+          } else {
+            ctx.shadowBlur = 0;
+          }
           ctx.beginPath();
           ctx.moveTo(p.x, p.y);
           ctx.lineTo(p.x - p.vx * 0.012, p.y - p.vy * 0.012);
