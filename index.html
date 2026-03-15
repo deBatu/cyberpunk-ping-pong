@@ -277,11 +277,11 @@
     <canvas id="canvas" aria-label="Cyberpunk Ping Pong"></canvas>
 
     <div class="hud">
-      <span class="label">Player</span>
+      <span class="label" id="leftLabel">Player</span>
       <span class="score player" id="playerScore">0</span>
       <span class="label">:</span>
       <span class="score ai" id="aiScore">0</span>
-      <span class="label">AI</span>
+      <span class="label" id="rightLabel">AI</span>
     </div>
 
     <div class="badge">
@@ -293,10 +293,17 @@
     <div class="overlay" id="startOverlay">
       <div class="panel">
         <h1>Cyberpunk Ping Pong</h1>
-        <p>Steuere links mit Maus oder Touch. Der Ball wird nach jedem Paddle-Treffer schneller.</p>
+        <p>Steuere links mit Maus/Touch oder W/S. Der Ball wird nach jedem Paddle-Treffer schneller.</p>
         <p>Power-Ups erscheinen waehrend des Spiels: Grow, Shrink, Slow.</p>
 
         <div class="controls">
+          <div class="control-row">
+            <span>Spielmodus</span>
+            <select id="modeSelect">
+              <option value="single" selected>Singleplayer</option>
+              <option value="multi">Multiplayer (Lokal)</option>
+            </select>
+          </div>
           <div class="control-row">
             <span>Schwierigkeit</span>
             <select id="difficultySelect">
@@ -349,9 +356,12 @@
       const startBtn = document.getElementById("startBtn");
       const restartBtn = document.getElementById("restartBtn");
 
+      const modeSelect = document.getElementById("modeSelect");
       const difficultySelect = document.getElementById("difficultySelect");
       const difficultyBadge = document.getElementById("difficultyBadge");
       const soundToggle = document.getElementById("soundToggle");
+      const leftLabel = document.getElementById("leftLabel");
+      const rightLabel = document.getElementById("rightLabel");
 
       const playerScoreEl = document.getElementById("playerScore");
       const aiScoreEl = document.getElementById("aiScore");
@@ -402,9 +412,17 @@
       let playerScore = 0;
       let aiScore = 0;
       let currentDifficulty = "normal";
+      let gameMode = "single"; // single | multi
+
+      const keyState = {
+        KeyW: false,
+        KeyS: false,
+        ArrowUp: false,
+        ArrowDown: false
+      };
 
       const player = { x: 0, y: 0, w: 14, h: 120, targetY: 0, speed: 1450 };
-      const ai = { x: 0, y: 0, w: 14, h: 120, speed: 920, mistake: 18 };
+      const ai = { x: 0, y: 0, w: 14, h: 120, targetY: 0, speed: 920, mistake: 18 };
       const ball = { x: 0, y: 0, r: 10, vx: 0, vy: 0 };
 
       // Power-Up Objekt; null wenn keines aktiv/spawned ist.
@@ -432,7 +450,16 @@
         currentDifficulty = id in DIFFICULTIES ? id : "normal";
         ai.speed = DIFFICULTIES[currentDifficulty].aiSpeed;
         ai.mistake = DIFFICULTIES[currentDifficulty].aiMistake;
-        difficultyBadge.textContent = DIFFICULTIES[currentDifficulty].label;
+        difficultyBadge.textContent =
+          gameMode === "multi" ? "Multiplayer" : DIFFICULTIES[currentDifficulty].label;
+      }
+
+      function applyGameMode(id) {
+        gameMode = id === "multi" ? "multi" : "single";
+        leftLabel.textContent = gameMode === "multi" ? "P1" : "Player";
+        rightLabel.textContent = gameMode === "multi" ? "P2" : "AI";
+        difficultySelect.disabled = gameMode === "multi";
+        applyDifficulty(difficultySelect.value);
       }
 
       function resetPaddles() {
@@ -450,6 +477,7 @@
         player.y = height / 2 - player.h / 2;
         ai.y = height / 2 - ai.h / 2;
         player.targetY = player.y;
+        ai.targetY = ai.y;
       }
 
       function resetBall(direction = Math.random() > 0.5 ? 1 : -1) {
@@ -518,7 +546,11 @@
 
       function endMatch(playerWon) {
         gameState = "gameover";
-        winnerText.textContent = playerWon ? "Du hast gewonnen!" : "Die KI hat gewonnen!";
+        if (gameMode === "multi") {
+          winnerText.textContent = playerWon ? "Player 1 gewinnt!" : "Player 2 gewinnt!";
+        } else {
+          winnerText.textContent = playerWon ? "Du hast gewonnen!" : "Die KI hat gewonnen!";
+        }
         winnerText.classList.toggle("danger", !playerWon);
         gameOverOverlay.classList.remove("hidden");
       }
@@ -553,14 +585,28 @@
       // -------------------------------
       // Input
       // -------------------------------
-      function updatePlayerTarget(clientY) {
+      function updatePlayerTarget(clientX, clientY) {
         const rect = canvas.getBoundingClientRect();
+        const x = clientX - rect.left;
         const y = clientY - rect.top;
-        player.targetY = y - player.h / 2;
+        const targetY = y - player.h / 2;
+        if (gameMode === "multi" && x > rect.width / 2) {
+          ai.targetY = targetY;
+        } else {
+          player.targetY = targetY;
+        }
       }
 
-      window.addEventListener("pointermove", (e) => updatePlayerTarget(e.clientY));
-      window.addEventListener("pointerdown", (e) => updatePlayerTarget(e.clientY));
+      window.addEventListener("pointermove", (e) => updatePlayerTarget(e.clientX, e.clientY));
+      window.addEventListener("pointerdown", (e) => updatePlayerTarget(e.clientX, e.clientY));
+
+      window.addEventListener("keydown", (e) => {
+        if (e.code in keyState) keyState[e.code] = true;
+      });
+
+      window.addEventListener("keyup", (e) => {
+        if (e.code in keyState) keyState[e.code] = false;
+      });
 
       // -------------------------------
       // Resize
@@ -619,15 +665,29 @@
         ai.y = clamp(ai.y, 0, height - ai.h);
 
         // Spieler-Paddle folgt Ziel.
+        const leftKeyDir = (keyState.KeyS ? 1 : 0) - (keyState.KeyW ? 1 : 0);
+        if (leftKeyDir !== 0) {
+          player.targetY += leftKeyDir * player.speed * dt;
+        }
         const desiredY = clamp(player.targetY, 0, height - player.h);
         const delta = desiredY - player.y;
         const maxStep = player.speed * dt;
         player.y += clamp(delta, -maxStep, maxStep);
         player.y = clamp(player.y, 0, height - player.h);
 
-        // KI-Paddle verfolgt Ball mit kleineren Fehlern je nach Difficulty.
-        const mistake = (Math.random() - 0.5) * ai.mistake;
-        const aiTarget = clamp(ball.y - ai.h / 2 + mistake, 0, height - ai.h);
+        let aiTarget = ai.y;
+        if (gameMode === "multi") {
+          const rightKeyDir = (keyState.ArrowDown ? 1 : 0) - (keyState.ArrowUp ? 1 : 0);
+          if (rightKeyDir !== 0) {
+            ai.targetY += rightKeyDir * player.speed * dt;
+          }
+          aiTarget = clamp(ai.targetY, 0, height - ai.h);
+        } else {
+          // KI-Paddle verfolgt Ball mit kleineren Fehlern je nach Difficulty.
+          const mistake = (Math.random() - 0.5) * ai.mistake;
+          aiTarget = clamp(ball.y - ai.h / 2 + mistake, 0, height - ai.h);
+        }
+
         const aiDelta = aiTarget - ai.y;
         ai.y += clamp(aiDelta, -ai.speed * dt, ai.speed * dt);
         ai.y = clamp(ai.y, 0, height - ai.h);
@@ -829,6 +889,10 @@
         applyDifficulty(difficultySelect.value);
       });
 
+      modeSelect.addEventListener("change", () => {
+        applyGameMode(modeSelect.value);
+      });
+
       soundToggle.addEventListener("click", () => {
         audioEnabled = !audioEnabled;
         soundToggle.textContent = audioEnabled ? "Sound: On" : "Sound: Off";
@@ -836,7 +900,7 @@
       });
 
       // Initialisierung
-      applyDifficulty("normal");
+      applyGameMode("single");
       updateScoreUi();
       resizeCanvas();
       requestAnimationFrame(loop);
