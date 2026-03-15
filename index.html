@@ -648,6 +648,19 @@
         guestPanel.classList.toggle("hidden", gameMode !== "online-guest");
       }
 
+      function onOpponentDisconnected() {
+        if (gameState !== "playing") return;
+        if (!(gameMode === "online-host" || gameMode === "online-guest")) return;
+
+        gameState = "gameover";
+        const localWinner = gameMode === "online-host" ? "Player 1" : "Player 2";
+        winnerText.textContent = localWinner + " gewinnt - Gegner getrennt";
+        winnerText.classList.remove("danger");
+        gameOverOverlay.classList.remove("hidden");
+        startOverlay.classList.add("hidden");
+        updateConnectionStatus("Gegner hat die Verbindung getrennt");
+      }
+
       function closeNet() {
         if (p2pConn) {
           p2pConn.onopen = null;
@@ -674,7 +687,10 @@
       function attachConnection(conn) {
         p2pConn = conn;
         p2pConn.on("open", () => updateConnectionStatus("Verbunden"));
-        p2pConn.on("close", () => updateConnectionStatus("Getrennt"));
+        p2pConn.on("close", () => {
+          updateConnectionStatus("Getrennt");
+          onOpponentDisconnected();
+        });
         p2pConn.on("data", (msg) => {
           try {
             if (typeof msg === "string") msg = JSON.parse(msg);
