@@ -699,17 +699,11 @@
               remoteRightTarget = clamp(msg.y, 0, height);
             }
             if (msg.t === "state" && gameMode === "online-guest") {
-              player.x = msg.s.player.x;
-              player.y = msg.s.player.y;
-              player.w = msg.s.player.w;
-              player.h = msg.s.player.h;
-              ai.x = msg.s.ai.x;
-              ai.y = msg.s.ai.y;
-              ai.w = msg.s.ai.w;
-              ai.h = msg.s.ai.h;
-              ball.x = msg.s.ball.x;
-              ball.y = msg.s.ball.y;
-              ball.r = msg.s.ball.r;
+              // Verwende relative Koordinaten, damit verschiedene Display-Groessen synchron bleiben.
+              player.y = clamp(msg.s.playerYNorm * height, 0, height - player.h);
+              ai.y = clamp(msg.s.aiYNorm * height, 0, height - ai.h);
+              ball.x = clamp(msg.s.ballXNorm * width, ball.r, width - ball.r);
+              ball.y = clamp(msg.s.ballYNorm * height, ball.r, height - ball.r);
               playerScore = msg.s.playerScore;
               aiScore = msg.s.aiScore;
               serveDelay = msg.s.serveDelay;
@@ -1296,9 +1290,10 @@
 
       function getNetState() {
         return {
-          player: { x: player.x, y: player.y, w: player.w, h: player.h },
-          ai: { x: ai.x, y: ai.y, w: ai.w, h: ai.h },
-          ball: { x: ball.x, y: ball.y, r: ball.r },
+          playerYNorm: height > 0 ? player.y / height : 0,
+          aiYNorm: height > 0 ? ai.y / height : 0,
+          ballXNorm: width > 0 ? ball.x / width : 0.5,
+          ballYNorm: height > 0 ? ball.y / height : 0.5,
           playerScore,
           aiScore,
           serveDelay,
